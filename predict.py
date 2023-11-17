@@ -50,6 +50,7 @@ def main():
     model_utils.predict(
         model=model_utils.load_model(results.checkpoint),
         path_to_image=results.path_to_image,
+        category_names=results.category_names,
         gpu=results.gpu,
         top_k=results.top_k
     )

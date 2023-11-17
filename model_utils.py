@@ -12,9 +12,9 @@ import data_loaders
 import pathlib
 
 
-def get_cat_to_name():
-    with open('cat_to_name.json', 'r') as f:
-        cat_to_name = json.load(f)
+def get_cat_to_name(category_names_json_file='cat_to_name.json'):
+    with open(category_names_json_file, 'r') as f:
+        cat_to_name = json.load(f, strict=False)
 
     return cat_to_name
 
@@ -174,13 +174,13 @@ def load_model(checkpoint_path):
     return model
 
 
-def predict(model, path_to_image, gpu, top_k):
+def predict(model, path_to_image, category_names, gpu, top_k):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
         '''
     if not pathlib.Path(path_to_image).exists():
         raise FileNotFoundError(f'Image {path_to_image} not found')
 
-    cat_to_name = get_cat_to_name()
+    cat_to_name = get_cat_to_name(category_names)
 
     device = get_device(gpu)
 
