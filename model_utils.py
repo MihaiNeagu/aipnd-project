@@ -31,25 +31,22 @@ def train_model(arch, learning_rate, data_dir, hidden_units, epochs, save_dir=No
     if save_dir is not None and not pathlib.Path(save_dir).exists():
         raise FileNotFoundError(f'Save directory {save_dir} not found.')
 
-    if arch not in models.list_models():
-        raise RuntimeError(f'No such model {arch}. Available models: {models.list_models()}')
+    available_models = ['resnet152', 'densenet121']
+    if arch not in available_models:
+        raise RuntimeError(f'No such model {arch}. Available models: {available_models}')
 
     data = data_loaders.get_data_loaders(data_dir)
 
     dataloaders = data['data_loaders']
     datasets = data['datasets']
 
-
     model = models.get_model(arch, weights=models.get_model_weights(arch))
 
     for param in model.parameters():
         param.requires_grad = False
 
-    classifier = get_classifier(hidden_units)
+    model = assign_classifier_to_model(model, arch, hidden_units, learning_rate)
 
-    model.classifier = classifier
-    criterion = nn.NLLLoss()
-    optimizer = optim.Adam(model.classifier.parameters(), lr=learning_rate)
     model.to(device)
 
     steps = 0
@@ -62,12 +59,12 @@ def train_model(arch, learning_rate, data_dir, hidden_units, epochs, save_dir=No
 
             inputs, labels = inputs.to(device), labels.to(device)
 
-            optimizer.zero_grad()
+            model.optimizer.zero_grad()
 
             logps = model.forward(inputs)
-            loss = criterion(logps, labels)
+            loss = model.criterion(logps, labels)
             loss.backward()
-            optimizer.step()
+            model.optimizer.step()
 
             running_loss += loss.item()
 
@@ -79,7 +76,7 @@ def train_model(arch, learning_rate, data_dir, hidden_units, epochs, save_dir=No
                     for inputs, labels in dataloaders['test']:
                         inputs, labels = inputs.to(device), labels.to(device)
                         logps = model.forward(inputs)
-                        batch_loss = criterion(logps, labels)
+                        batch_loss = model.criterion(logps, labels)
 
                         test_loss += batch_loss.item()
 
@@ -96,9 +93,6 @@ def train_model(arch, learning_rate, data_dir, hidden_units, epochs, save_dir=No
                 running_loss = 0
                 model.train()
 
-    model.arch = arch
-    model.hidden_units = hidden_units
-    model.optimizer = optimizer
     model.epochs = epochs
     model.gpu = gpu
     model.class_to_idx = datasets['train'].class_to_idx
@@ -109,14 +103,30 @@ def train_model(arch, learning_rate, data_dir, hidden_units, epochs, save_dir=No
     return model
 
 
-def get_classifier(hidden_units):
+def assign_classifier_to_model(model, arch, hidden_units, learning_rate):
     cat_to_name = get_cat_to_name()
-    classifier = nn.Sequential(nn.Linear(1024, hidden_units),
-                               nn.ReLU(),
-                               nn.Dropout(0.2),
-                               nn.Linear(hidden_units, len(cat_to_name)),
-                               nn.LogSoftmax(dim=1))
-    return classifier
+
+    match arch:
+        case 'densenet121':
+            classifier = nn.Sequential(nn.Linear(1024, hidden_units),
+                                       nn.ReLU(),
+                                       nn.Dropout(0.2),
+                                       nn.Linear(hidden_units, len(cat_to_name)),
+                                       nn.LogSoftmax(dim=1))
+            model.arch = arch
+            model.hidden_units = hidden_units
+            model.classifier = classifier
+            model.criterion = nn.NLLLoss()
+            model.learning_rate = learning_rate
+            model.optimizer = optim.Adam(model.classifier.parameters(), lr=learning_rate)
+
+            return model
+        case 'densenet121':
+            return nn.Sequential(nn.Linear(1024, hidden_units),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.2),
+                                 nn.Linear(hidden_units, len(cat_to_name)),
+                                 nn.LogSoftmax(dim=1))
 
 
 def get_device(gpu):
@@ -140,12 +150,13 @@ def save_model(model, save_dir):
         'hidden_units': model.hidden_units,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': model.optimizer.state_dict(),
+        'learning_rate': model.learning_rate,
         'epochs': model.epochs,
         'gpu': model.gpu,
         'class_to_idx': model.class_to_idx
     }
 
-    torch.save(checkpoint, f'{save_dir}/checkpoint.pth')
+    torch.save(checkpoint, f'{save_dir}/checkpoint_{model.arch}.pth')
 
 
 def load_model(checkpoint_path):
@@ -157,7 +168,12 @@ def load_model(checkpoint_path):
     device = get_device(checkpoint['gpu'])
 
     model = models.get_model(checkpoint['arch'], weights=models.get_model_weights(checkpoint['arch']))
-    model.classifier = get_classifier(checkpoint['hidden_units'])
+    model = assign_classifier_to_model(
+        model,
+        checkpoint['arch'],
+        checkpoint['hidden_units'],
+        checkpoint['learning_rate']
+    )
     model.load_state_dict(checkpoint['model_state_dict'])
     model.optimizer = optim.Adam(model.classifier.parameters(), lr=0.003)
     model.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -200,7 +216,6 @@ def predict(model, path_to_image, category_names, gpu, top_k):
 
     print(f'Flower name: {top_labels[0]} with a probability of {probabilities[0]}')
     print(f'Top {top_k} most likely classes: ', dict(zip(top_labels, probabilities)))
-
 
 
 def crop_center(img, size=(224, 224)):
