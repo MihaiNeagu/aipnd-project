@@ -121,12 +121,20 @@ def assign_classifier_to_model(model, arch, hidden_units, learning_rate):
             model.optimizer = optim.Adam(model.classifier.parameters(), lr=learning_rate)
 
             return model
-        case 'densenet121':
-            return nn.Sequential(nn.Linear(1024, hidden_units),
-                                 nn.ReLU(),
-                                 nn.Dropout(0.2),
-                                 nn.Linear(hidden_units, len(cat_to_name)),
-                                 nn.LogSoftmax(dim=1))
+        case 'resnet152':
+            classifier = nn.Sequential(nn.Linear(2048, hidden_units),
+                                       nn.ReLU(),
+                                       nn.Dropout(0.2),
+                                       nn.Linear(hidden_units, len(cat_to_name)),
+                                       nn.LogSoftmax(dim=1))
+            model.arch = arch
+            model.hidden_units = hidden_units
+            model.fc = classifier
+            model.criterion = nn.NLLLoss()
+            model.learning_rate = learning_rate
+            model.optimizer = optim.Adam(model.fc.parameters(), lr=learning_rate)
+
+            return model
 
 
 def get_device(gpu):
@@ -175,7 +183,6 @@ def load_model(checkpoint_path):
         checkpoint['learning_rate']
     )
     model.load_state_dict(checkpoint['model_state_dict'])
-    model.optimizer = optim.Adam(model.classifier.parameters(), lr=0.003)
     model.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     model.arch = checkpoint['arch']
